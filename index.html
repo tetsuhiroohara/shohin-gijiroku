@@ -725,7 +725,7 @@ const STAMP_META = [
   {key:'exec',label:'専務',perm:'stamp-dept'},
 ];
 const DISC_CATS = ['図面修正','工程確認','設備対応','品質確認','納期調整','その他'];
-const TAB_LABELS = ['基本情報','図面・書類','承認事項','専用金型','現場打合せ','納期管理','予定工程','確認印欄','特記事項'];
+const TAB_LABELS = ['基本情報','図面・書類','承認事項','専用金型','現場打合せ','予定工程','納期管理','確認印欄','特記事項'];
 const TG_CLS = {'有':'v-yes','無':'v-no','N/A':'v-na','承認':'v-appr','否認':'v-dny','保留':'v-hold','OK':'v-ok','NG':'v-ng','試作':'v-sel','量産':'v-sel','その他':'v-sel','要確認':'v-hold'};
 
 // ══════════════════════════════════════════════════════
@@ -916,8 +916,8 @@ function buildSlackMessage(rec){
   const timeStr=rec.meetingTime||'';
   const place=rec.place||'─';
   const customer=rec.customer||'─';
-  const productName=rec.productName||'─';
-  const productNo=rec.productNo?` (${rec.productNo})`:'';
+  const productName=(rec.productNames||[rec.productName||'']).filter(Boolean).join(' / ')||'─';
+  const productNo=(rec.productNos||[rec.productNo||'']).filter(Boolean).join(' / ');
   const controlNo=rec.controlNo||'─';
   const type=rec.type||'─';
 
@@ -1377,7 +1377,7 @@ function renderCards(){
   const q=(document.getElementById('search-input').value||'').toLowerCase();
   const filtered=records.filter(r=>
     (r.customer||'').toLowerCase().includes(q)||
-    (r.productName||'').toLowerCase().includes(q)||
+    (r.productNames||[r.productName||'']).join(' ').toLowerCase().includes(q)||
     (r.productNo||'').toLowerCase().includes(q)
   );
   const tagCls={'試作':'tag-trial','量産':'tag-mass','その他':'tag-other'};
@@ -1397,7 +1397,7 @@ function renderCards(){
     <div class="card" onclick="openDetail('${rec.id}')">
       <div class="card-body">
         <div class="card-top">
-          <div class="card-title">${esc(rec.productName)||'（品名未入力）'}</div>
+          <div class="card-title">${esc((rec.productNames||[rec.productName||'']).filter(Boolean).join(' / '))||'（品名未入力）'}</div>
           <div class="tag ${tagCls[rec.type]||'tag-other'}">${esc(rec.type)||'試作'}</div>
         </div>
         <div class="card-cust">👤 ${esc(rec.customer)||'（顧客名未入力）'}</div>
@@ -1432,11 +1432,12 @@ function blankRec(){
   return {
     id:'r'+Date.now(), createdAt:new Date().toISOString(),
     meetingDate:'',meetingTime:'',place:'',type:'試作',
-    customer:'',productName:'',productNo:'',
+    customer:'',productNames:[''],productNos:[''],
     partsCount:'',trialQty:'',massQty:'',
     controlNo:genControlNo(),
     participants:Array(10).fill(''),
     docs:Object.fromEntries(DOC_META.map(d=>[d.key,{val:'',note:''}])),
+    docAttachments:{},
     approvals:Object.fromEntries(APPR_META.map(a=>[a.key,{sales:'',mgmt:'',note:''}])),
     molds:Array.from({length:4},()=>({name:'',val:'',vendor:'',orderDate:'',duePlan:'',dueFixed:'',note:''})),
     discussions:Array.from({length:8},()=>({requester:'',worker:'',cat:'',detail:'',eval:'',deadline:'',owner:''})),
@@ -1652,8 +1653,70 @@ function buildSec1(){
   w.appendChild(fg_('場所',false,makeInp(()=>f.place,v=>f.place=v,{ph:'例：第二工場 会議室',fieldLabel:'場所'})));
   const tFg=document.createElement('div');tFg.className='fg';tFg.appendChild(lbl_('種別区分'));tFg.appendChild(makeTg(['試作','量産','その他'],()=>f.type,v=>f.type=v,'種別区分'));w.appendChild(tFg);
   w.appendChild(fg_('顧客名',true,makeInp(()=>f.customer,v=>f.customer=v,{ph:'顧客名',fieldLabel:'顧客名'})));
-  w.appendChild(fg_('品名',true,makeInp(()=>f.productName,v=>f.productName=v,{ph:'製品名',fieldLabel:'品名'})));
-  w.appendChild(fg_('品番',false,makeInp(()=>f.productNo,v=>f.productNo=v,{ph:'品番',fieldLabel:'品番'})));
+
+  // ── 品名（複数）
+  if(!Array.isArray(f.productNames)) f.productNames=[f.productName||''];
+  const pnFg=document.createElement('div');pnFg.className='fg';
+  const pnLbl=document.createElement('div');pnLbl.style.cssText='display:flex;align-items:center;justify-content:space-between;margin-bottom:6px';
+  const pnL=document.createElement('span');pnL.className='lbl';pnL.innerHTML='品名 <span style="color:var(--red)">*</span>';
+  const pnAdd=document.createElement('button');
+  pnAdd.style.cssText='font-size:10px;font-weight:700;background:var(--sky);color:white;border:none;border-radius:6px;padding:3px 10px;cursor:pointer;font-family:inherit';
+  pnAdd.textContent='＋ 追加';
+  pnLbl.appendChild(pnL);pnLbl.appendChild(pnAdd);
+  pnFg.appendChild(pnLbl);
+  const pnList=document.createElement('div');pnList.style.cssText='display:flex;flex-direction:column;gap:5px';
+  function redrawPn(){
+    pnList.innerHTML='';
+    f.productNames.forEach((v,i)=>{
+      const row=document.createElement('div');row.style.cssText='display:flex;gap:5px;align-items:center';
+      const inp=makeInp(()=>f.productNames[i],val=>{f.productNames[i]=val;},{ ph:`品名 ${i+1}`, fieldLabel:`品名${i+1}` });
+      inp.style.flex='1';
+      row.appendChild(inp);
+      if(f.productNames.length>1){
+        const del=document.createElement('button');
+        del.textContent='✕';del.style.cssText='background:rgba(198,40,40,0.12);border:1px solid rgba(198,40,40,0.3);color:var(--red);border-radius:6px;padding:4px 8px;cursor:pointer;font-size:11px;flex-shrink:0';
+        del.addEventListener('click',()=>{ f.productNames.splice(i,1); redrawPn(); });
+        row.appendChild(del);
+      }
+      pnList.appendChild(row);
+    });
+  }
+  pnAdd.addEventListener('click',()=>{ f.productNames.push(''); redrawPn(); });
+  redrawPn();
+  pnFg.appendChild(pnList);
+  w.appendChild(pnFg);
+
+  // ── 品番（複数）
+  if(!Array.isArray(f.productNos)) f.productNos=[f.productNo||''];
+  const pnoFg=document.createElement('div');pnoFg.className='fg';
+  const pnoLbl=document.createElement('div');pnoLbl.style.cssText='display:flex;align-items:center;justify-content:space-between;margin-bottom:6px';
+  const pnoL=document.createElement('span');pnoL.className='lbl';pnoL.textContent='品番';
+  const pnoAdd=document.createElement('button');
+  pnoAdd.style.cssText='font-size:10px;font-weight:700;background:var(--sky);color:white;border:none;border-radius:6px;padding:3px 10px;cursor:pointer;font-family:inherit';
+  pnoAdd.textContent='＋ 追加';
+  pnoLbl.appendChild(pnoL);pnoLbl.appendChild(pnoAdd);
+  pnoFg.appendChild(pnoLbl);
+  const pnoList=document.createElement('div');pnoList.style.cssText='display:flex;flex-direction:column;gap:5px';
+  function redrawPno(){
+    pnoList.innerHTML='';
+    f.productNos.forEach((v,i)=>{
+      const row=document.createElement('div');row.style.cssText='display:flex;gap:5px;align-items:center';
+      const inp=makeInp(()=>f.productNos[i],val=>{f.productNos[i]=val;},{ ph:`品番 ${i+1}`, fieldLabel:`品番${i+1}` });
+      inp.style.flex='1';
+      row.appendChild(inp);
+      if(f.productNos.length>1){
+        const del=document.createElement('button');
+        del.textContent='✕';del.style.cssText='background:rgba(198,40,40,0.12);border:1px solid rgba(198,40,40,0.3);color:var(--red);border-radius:6px;padding:4px 8px;cursor:pointer;font-size:11px;flex-shrink:0';
+        del.addEventListener('click',()=>{ f.productNos.splice(i,1); redrawPno(); });
+        row.appendChild(del);
+      }
+      pnoList.appendChild(row);
+    });
+  }
+  pnoAdd.addEventListener('click',()=>{ f.productNos.push(''); redrawPno(); });
+  redrawPno();
+  pnoFg.appendChild(pnoList);
+  w.appendChild(pnoFg);
   const qFg=document.createElement('div');qFg.className='fg';qFg.appendChild(lbl_('部品・数量'));
   qFg.appendChild(row3_(
     wf_('部品種類数',makeInp(()=>f.partsCount,v=>f.partsCount=v,{ph:'種',fieldLabel:'部品種類数'})),
@@ -1692,11 +1755,126 @@ function buildSec1(){
 }
 // ─ Section 2 ─
 function buildSec2(){
-  const f=formRec,w=document.createElement('div');w.appendChild(secH_('2','📄','図面・書類確認','02 / 09'));
+  const f=formRec,w=document.createElement('div');
+  w.appendChild(secH_('2','📄','図面・書類確認','02 / 09'));
+
+  // 添付ファイル初期化
+  if(!f.docAttachments) f.docAttachments={};
+
   DOC_META.forEach(({key,label})=>{
     const nm=document.createElement('span');nm.className='sub-name';nm.textContent=label;
-    w.appendChild(subCard_([nm,makeTg(['有','無','N/A'],()=>f.docs[key].val,v=>f.docs[key].val=v)],[wf_('備考',makeInp(()=>f.docs[key].note,v=>f.docs[key].note=v,{ph:'内容や備考'}))]));
-  });return w;
+
+    // ── 添付ファイルエリア
+    const attachWrap=document.createElement('div');
+    attachWrap.style.cssText='margin-top:8px;border-top:1px dashed var(--border);padding-top:8px';
+
+    const attachLbl=document.createElement('div');
+    attachLbl.style.cssText='font-size:10px;font-weight:700;color:var(--sky);margin-bottom:6px;display:flex;align-items:center;gap:6px';
+    attachLbl.innerHTML='📎 添付ファイル';
+
+    // 添付ファイルリスト表示エリア
+    const fileListEl=document.createElement('div');
+    fileListEl.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px';
+
+    // ファイル追加ボタン
+    const fileInput=document.createElement('input');
+    fileInput.type='file';fileInput.multiple=true;
+    fileInput.accept='image/*,.pdf,.xlsx,.xls,.docx,.doc,.csv,.txt,.zip';
+    fileInput.style.display='none';
+
+    const addFileBtn=document.createElement('button');
+    addFileBtn.style.cssText='font-size:10px;font-weight:700;background:rgba(21,101,192,0.08);border:1.5px dashed rgba(21,101,192,0.35);color:var(--sky);border-radius:8px;padding:5px 12px;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:4px';
+    addFileBtn.innerHTML='＋ ファイルを添付';
+    addFileBtn.addEventListener('click',()=>fileInput.click());
+
+    function redrawFiles(){
+      fileListEl.innerHTML='';
+      const files=f.docAttachments[key]||[];
+      files.forEach((att,fi)=>{
+        const chip=document.createElement('div');
+        chip.style.cssText='position:relative;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--surface2);max-width:120px';
+
+        if(att.type&&att.type.startsWith('image/')){
+          // 画像プレビュー
+          const img=document.createElement('img');
+          img.src=att.data;
+          img.style.cssText='width:120px;height:80px;object-fit:cover;display:block;cursor:pointer';
+          img.addEventListener('click',()=>{
+            const ov=document.createElement('div');
+            ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+            const bigImg=document.createElement('img');
+            bigImg.src=att.data;bigImg.style.cssText='max-width:100%;max-height:90vh;border-radius:8px;box-shadow:0 4px 32px rgba(0,0,0,0.5)';
+            const closeBtn=document.createElement('button');
+            closeBtn.textContent='✕';closeBtn.style.cssText='position:fixed;top:16px;right:16px;background:white;border:none;border-radius:50%;width:36px;height:36px;font-size:18px;cursor:pointer;font-weight:700;z-index:10000';
+            closeBtn.addEventListener('click',()=>ov.remove());
+            ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});
+            ov.appendChild(bigImg);ov.appendChild(closeBtn);
+            document.body.appendChild(ov);
+          });
+          chip.appendChild(img);
+        } else {
+          // ファイルアイコン
+          const icon=document.createElement('div');
+          const ext=(att.name||'').split('.').pop().toLowerCase();
+          const iconMap={pdf:'🔴',xlsx:'🟢',xls:'🟢',docx:'🔵',doc:'🔵',csv:'🟡',zip:'🟠'};
+          icon.style.cssText='width:120px;height:70px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;cursor:pointer';
+          icon.innerHTML=`<span style="font-size:28px">${iconMap[ext]||'📄'}</span><span style="font-size:8.5px;color:var(--text2);font-weight:700;text-transform:uppercase">${ext}</span>`;
+          icon.addEventListener('click',()=>{
+            const a=document.createElement('a');
+            a.href=att.data;a.download=att.name||'file';a.click();
+          });
+          chip.appendChild(icon);
+        }
+
+        // ファイル名
+        const fnEl=document.createElement('div');
+        fnEl.style.cssText='font-size:8px;padding:2px 5px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px;background:var(--surface3)';
+        fnEl.title=att.name||'';
+        fnEl.textContent=att.name||'file';
+        chip.appendChild(fnEl);
+
+        // 削除ボタン
+        const delBtn=document.createElement('button');
+        delBtn.textContent='✕';
+        delBtn.style.cssText='position:absolute;top:2px;right:2px;background:rgba(198,40,40,0.75);color:white;border:none;border-radius:50%;width:18px;height:18px;font-size:10px;cursor:pointer;line-height:1;display:flex;align-items:center;justify-content:center;padding:0';
+        delBtn.addEventListener('click',()=>{
+          f.docAttachments[key].splice(fi,1);
+          redrawFiles();
+        });
+        chip.appendChild(delBtn);
+        fileListEl.appendChild(chip);
+      });
+    }
+
+    fileInput.addEventListener('change',async()=>{
+      if(!f.docAttachments[key]) f.docAttachments[key]=[];
+      const reads=Array.from(fileInput.files).map(file=>new Promise(res=>{
+        const reader=new FileReader();
+        reader.onload=e=>res({name:file.name,type:file.type,size:file.size,data:e.target.result});
+        reader.readAsDataURL(file);
+      }));
+      const results=await Promise.all(reads);
+      // サイズ警告（5MB超）
+      const tooBig=results.filter(r=>r.size>5*1024*1024);
+      if(tooBig.length) showToast(`⚠️ ${tooBig.map(r=>r.name).join(',')} は5MB超のため添付できません`,'err');
+      const ok=results.filter(r=>r.size<=5*1024*1024);
+      f.docAttachments[key].push(...ok);
+      redrawFiles();
+      fileInput.value='';
+    });
+
+    redrawFiles();
+    attachWrap.appendChild(attachLbl);
+    attachWrap.appendChild(fileListEl);
+    attachWrap.appendChild(addFileBtn);
+    attachWrap.appendChild(fileInput);
+
+    w.appendChild(subCard_([nm,makeTg(['有','無','N/A'],()=>f.docs[key].val,v=>f.docs[key].val=v)],[
+      wf_('備考',makeInp(()=>f.docs[key].note,v=>f.docs[key].note=v,{ph:'内容や備考'})),
+      attachWrap
+    ]));
+  });
+  return w;
 }
 // ─ Section 3 ─
 function buildSec3(){
@@ -1789,43 +1967,125 @@ function migrateProcs(f){
 
 // 親工程の全ステップ合計猶予
 function parentTotalDays(proc){
-  return (proc.steps||[]).reduce((s,x)=>s+parseFloat(x.schedDays||0),0);
+  return (proc.steps||[]).reduce((s,x)=>s+parseFloat(x.fixedDays||0),0);
 }
 // 子部品の全ステップ合計猶予
 function partTotalDays(part){
-  return (part.steps||[]).reduce((s,x)=>s+parseFloat(x.schedDays||0),0);
+  return (part.steps||[]).reduce((s,x)=>s+parseFloat(x.fixedDays||0),0);
+}
+// 合流先親工程より「前」にある親工程の合計猶予（新バリデーション用）
+function totalDaysBeforeParent(f, targetParentId){
+  const parents=f.processes.filter(p=>p.type==='parent');
+  const idx=parents.findIndex(p=>p.id===targetParentId);
+  if(idx<=0) return 0; // 最初の親工程なら0
+  return parents.slice(0,idx).reduce((s,p)=>s+parentTotalDays(p),0);
 }
 
 function buildSec7(){
   const f=formRec;
-  migrateProcs(f);
+  // processGroups: [{id, name, processes:[...]}]
+  if(!Array.isArray(f.processGroups)||!f.processGroups.length){
+    // 既存 processes を最初のグループに移行
+    f.processGroups=[{id:'g'+Date.now(),name:'工程表①',processes:f.processes||[]}];
+  }
+  f.processes=f.processGroups[0].processes; // 互換性維持
+
   const w=document.createElement('div');
-  w.appendChild(secH_('7','⚙️','予定工程（BOM）','07 / 09'));
+  w.appendChild(secH_('6','⚙️','予定工程（BOM）','06 / 09'));
 
   const hint=document.createElement('div');
   hint.style.cssText='padding:9px 18px;font-size:11px;color:var(--text3);background:var(--surface2);border-bottom:1px solid var(--border);line-height:1.8';
-  hint.innerHTML='<b style="color:var(--gold)">📦 BOM工程</b>　親工程は単独使用可・複数工程ステップ追加可。子部品は複数パーツ（工程ステップ）を持て、最終ステップで合流先の親工程を指定します。子部品の合計工程猶予が合流先を超える場合は保存できません。';
+  hint.innerHTML='<b style="color:var(--gold)">📦 BOM工程</b>　工程表タブを追加して複数の工程表を管理できます。親工程は並べ替え・割り込み挿入可能。子部品の確定猶予合計が合流先前工程の確定猶予合計を超える場合は保存できません。';
   w.appendChild(hint);
 
-  const topBar=document.createElement('div');
-  topBar.style.cssText='padding:10px 16px;border-bottom:1px solid var(--border);background:var(--surface)';
-  const addPBtn=document.createElement('button');
-  addPBtn.style.cssText='width:100%;padding:11px;border-radius:var(--r2);font-size:12px;font-weight:700;font-family:inherit;cursor:pointer;border:none;background:linear-gradient(135deg,var(--bg1),var(--bg2));color:var(--gold2);display:flex;align-items:center;justify-content:center;gap:6px';
-  addPBtn.innerHTML='＋ 親工程を追加';
-  addPBtn.addEventListener('click',()=>{
-    f.processes.push({id:procId(),type:'parent',name:'',
-      steps:[{id:procId(),name:'',outsource:'',seconds:'',schedDays:'',schedActual:'',fixedDays:'',fixedActual:'',note:''}]});
-    drawSec7(f,listEl);
-  });
-  topBar.appendChild(addPBtn);
-  w.appendChild(topBar);
+  // ── 工程表タブバー
+  let curGroupIdx=0;
+  const tabBar=document.createElement('div');
+  tabBar.style.cssText='display:flex;align-items:center;gap:0;border-bottom:2px solid var(--border);background:var(--surface2);overflow-x:auto;padding:0 8px;';
 
   const listEl=document.createElement('div');
   listEl.style.cssText='padding:10px 14px 40px';
+
+  function drawGroupTabs(){
+    tabBar.innerHTML='';
+    f.processGroups.forEach((g,gi)=>{
+      const tab=document.createElement('button');
+      tab.style.cssText=`padding:9px 14px;font-size:11px;font-weight:700;font-family:inherit;border:none;border-bottom:3px solid ${gi===curGroupIdx?'var(--sky)':'transparent'};background:transparent;color:${gi===curGroupIdx?'var(--sky)':'var(--text3)'};cursor:pointer;white-space:nowrap;flex-shrink:0`;
+      // タブ名入力
+      const nameEl=document.createElement('span');
+      nameEl.contentEditable=true;
+      nameEl.style.cssText='outline:none;min-width:40px;display:inline-block';
+      nameEl.textContent=g.name||`工程表${gi+1}`;
+      nameEl.addEventListener('blur',()=>{ g.name=nameEl.textContent.trim()||`工程表${gi+1}`; });
+      nameEl.addEventListener('click',e=>{ if(gi===curGroupIdx) e.stopPropagation(); });
+      tab.appendChild(nameEl);
+      if(f.processGroups.length>1){
+        const dx=document.createElement('span');
+        dx.textContent=' ✕';dx.style.cssText='font-size:9px;color:rgba(198,40,40,0.6);margin-left:3px';
+        dx.addEventListener('click',e=>{
+          e.stopPropagation();
+          if(!confirm(`「${g.name}」を削除しますか？`)) return;
+          f.processGroups.splice(gi,1);
+          if(curGroupIdx>=f.processGroups.length) curGroupIdx=f.processGroups.length-1;
+          drawGroupTabs(); drawCurrentGroup();
+        });
+        tab.appendChild(dx);
+      }
+      tab.addEventListener('click',()=>{ curGroupIdx=gi; drawGroupTabs(); drawCurrentGroup(); });
+      tabBar.appendChild(tab);
+    });
+    // ＋ 工程表追加ボタン
+    const addTab=document.createElement('button');
+    addTab.style.cssText='padding:8px 12px;font-size:11px;font-weight:700;font-family:inherit;border:none;background:transparent;color:var(--sky);cursor:pointer;white-space:nowrap;flex-shrink:0';
+    addTab.textContent='＋ 工程表追加';
+    addTab.addEventListener('click',()=>{
+      f.processGroups.push({id:'g'+Date.now(),name:`工程表${f.processGroups.length+1}`,processes:[]});
+      curGroupIdx=f.processGroups.length-1;
+      drawGroupTabs(); drawCurrentGroup();
+    });
+    tabBar.appendChild(addTab);
+  }
+
+  function drawCurrentGroup(){
+    const g=f.processGroups[curGroupIdx];
+    if(!g) return;
+    f.processes=g.processes; // 現在グループのprocessesをf.processesに同期
+    migrateProcs(f);
+    g.processes=f.processes;
+
+    // 操作バー
+    listEl.innerHTML='';
+    const topBar=document.createElement('div');
+    topBar.style.cssText='padding:8px 12px;border-bottom:1px solid var(--border);background:var(--surface);display:flex;gap:6px;margin-bottom:4px';
+    const addPBtn=document.createElement('button');
+    addPBtn.style.cssText='flex:1;padding:9px;border-radius:var(--r2);font-size:12px;font-weight:700;font-family:inherit;cursor:pointer;border:none;background:linear-gradient(135deg,var(--bg1),var(--bg2));color:var(--gold2);display:flex;align-items:center;justify-content:center;gap:6px';
+    addPBtn.innerHTML='＋ 親工程を追加';
+    addPBtn.addEventListener('click',()=>{
+      f.processes.push({id:procId(),type:'parent',name:'',
+        steps:[{id:procId(),name:'',outsource:'',setupMins:'',seconds:'',fixedDays:'',note:''}]});
+      g.processes=f.processes;
+      drawSec7inner(f,procListEl);
+    });
+    const bomPdfBtn=document.createElement('button');
+    bomPdfBtn.style.cssText='padding:9px 12px;border-radius:var(--r2);font-size:11px;font-weight:700;font-family:inherit;cursor:pointer;border:none;background:linear-gradient(135deg,#1d4ed8,#2563eb);color:white;display:flex;align-items:center;gap:4px;flex-shrink:0';
+    bomPdfBtn.innerHTML='🖨 BOM PDF';
+    bomPdfBtn.addEventListener('click',()=>printBomPdf(f));
+    topBar.appendChild(addPBtn);topBar.appendChild(bomPdfBtn);
+    listEl.appendChild(topBar);
+
+    const procListEl=document.createElement('div');
+    procListEl.style.cssText='padding:6px 10px 40px';
+    listEl.appendChild(procListEl);
+    drawSec7inner(f,procListEl);
+  }
+
+  w.appendChild(tabBar);
   w.appendChild(listEl);
-  drawSec7(f,listEl);
+  drawGroupTabs();
+  drawCurrentGroup();
   return w;
 }
+
 
 // ── 親工程のswap（上下移動用）
 function swapParents(f, idxA, idxB){
@@ -1895,12 +2155,12 @@ function attachTouchSort(handle, proc, f, el){
     parents.splice(insertAt,0,moved);
     const others=f.processes.filter(p=>p.type!=='parent');
     f.processes=[...parents,...others];
-    drawSec7(f,el);
+    drawSec7inner(f,el);
   });
 }
 
 
-function drawSec7(f,el){
+function drawSec7inner(f,el){
   el.innerHTML='';
   const parents=f.processes.filter(p=>p.type==='parent');
   const parts  =f.processes.filter(p=>p.type==='part');
@@ -1979,7 +2239,7 @@ function makeInsertZone(insertIndex, f, el){
     if(toIdx===fromIdx||toIdx===fromIdx+1) return; // 移動不要
     // processes 内での並べ替え
     reorderParent(f,fromIdx,toIdx);
-    drawSec7(f,el);
+    drawSec7inner(f,el);
   });
 
   // ── 割り込みボタン（ホバーで表示）
@@ -1990,7 +2250,7 @@ function makeInsertZone(insertIndex, f, el){
     e.stopPropagation();
     const parents=f.processes.filter(p=>p.type==='parent');
     const newProc={id:procId(),type:'parent',name:'',
-      steps:[{id:procId(),name:'',outsource:'',seconds:'',schedDays:'',schedActual:'',fixedDays:'',fixedActual:'',note:''}]};
+      steps:[{id:procId(),name:'',outsource:'',setupMins:'',seconds:'',fixedDays:'',note:''}]};
     // 全processesのうち親工程のみ対象でinsertIndex番目に挿入
     const allParentIds=parents.map(p=>p.id);
     if(insertIndex>=allParentIds.length){
@@ -2000,7 +2260,7 @@ function makeInsertZone(insertIndex, f, el){
       const refIdx=f.processes.findIndex(p=>p.id===refId);
       f.processes.splice(refIdx,0,newProc);
     }
-    drawSec7(f,el);
+    drawSec7inner(f,el);
   });
   zone.appendChild(btn);
 
@@ -2061,7 +2321,7 @@ function mkParentCard(proc,pi,mergedParts,f,parents,el){
   upBtn.addEventListener('click',()=>{
     if(pi===0) return;
     swapParents(f,pi,pi-1);
-    drawSec7(f,el);
+    drawSec7inner(f,el);
   });
   const dnBtn=document.createElement('button');
   dnBtn.innerHTML='▼';
@@ -2070,7 +2330,7 @@ function mkParentCard(proc,pi,mergedParts,f,parents,el){
   dnBtn.addEventListener('click',()=>{
     if(pi===parents.length-1) return;
     swapParents(f,pi,pi+1);
-    drawSec7(f,el);
+    drawSec7inner(f,el);
   });
   sortWrap.appendChild(upBtn);sortWrap.appendChild(dnBtn);
 
@@ -2082,7 +2342,7 @@ function mkParentCard(proc,pi,mergedParts,f,parents,el){
     if(hasMerge&&!confirm('この親工程に合流している子部品があります。削除すると合流設定がクリアされます。続けますか？')) return;
     f.processes.forEach(pt=>{if(pt.steps)pt.steps.forEach(s=>{if(s.mergeToParentId===proc.id)s.mergeToParentId='';});});
     f.processes=f.processes.filter(p=>p.id!==proc.id);
-    drawSec7(f,el);
+    drawSec7inner(f,el);
   });
   hdr.appendChild(handle);hdr.appendChild(num);hdr.appendChild(nm);hdr.appendChild(sortWrap);hdr.appendChild(delBtn);
   card.appendChild(hdr);
@@ -2098,20 +2358,20 @@ function mkParentCard(proc,pi,mergedParts,f,parents,el){
 
   function redrawParentSteps(){
     stepsArea.innerHTML='';
-    if(!proc.steps||!proc.steps.length) proc.steps=[{id:procId(),name:'',outsource:'',seconds:'',schedDays:'',schedActual:'',fixedDays:'',fixedActual:'',note:''}];
+    if(!proc.steps||!proc.steps.length) proc.steps=[{id:procId(),name:'',outsource:'',setupMins:'',seconds:'',fixedDays:'',note:''}];
     proc.steps.forEach((st,si)=>{
       const alone=proc.steps.length===1;
       const sd=document.createElement('div');
-      sd.style.cssText='padding:11px 14px;border-bottom:1px solid var(--border)';
+      sd.style.cssText='padding:6px 10px;border-bottom:1px solid var(--border)';
 
       // ステップ内ヘッダー行
       const sh=document.createElement('div');
-      sh.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:9px';
+      sh.style.cssText='display:flex;align-items:center;gap:6px;margin-bottom:5px';
       const sn=document.createElement('span');
-      sn.style.cssText='font-size:9.5px;font-weight:700;font-family:JetBrains Mono,monospace;color:var(--text3);background:var(--surface2);padding:3px 8px;border-radius:8px;border:1px solid var(--border);flex-shrink:0';
+      sn.style.cssText='font-size:9px;font-weight:700;font-family:JetBrains Mono,monospace;color:var(--text3);background:var(--surface2);padding:2px 6px;border-radius:6px;border:1px solid var(--border);flex-shrink:0';
       sn.textContent=alone?'工程':'STEP '+String(si+1).padStart(2,'0');
       const snm=document.createElement('input');
-      snm.style.cssText='flex:1;background:transparent;border:none;border-bottom:1px dashed var(--border);color:var(--text2);font-size:11.5px;font-weight:600;font-family:inherit;min-width:0;outline:none;padding-bottom:2px';
+      snm.style.cssText='flex:1;background:transparent;border:none;border-bottom:1px dashed var(--border);color:var(--text2);font-size:11px;font-weight:600;font-family:inherit;min-width:0;outline:none;padding-bottom:1px';
       snm.placeholder=alone?'詳細メモ（省略可）':'ステップ名';snm.value=st.name||'';
       snm.addEventListener('input',e=>st.name=e.target.value);
       sh.appendChild(sn);sh.appendChild(snm);
@@ -2127,17 +2387,31 @@ function mkParentCard(proc,pi,mergedParts,f,parents,el){
       }
       sd.appendChild(sh);
 
-      const fb=document.createElement('div');fb.style.cssText='display:flex;flex-direction:column;gap:8px';
-      fb.appendChild(wf_('協力先',makeInp(()=>st.outsource,v=>st.outsource=v,{ph:'外注先・協力会社（自由記入）'})));
-      fb.appendChild(wf_('作業時間（秒）',makeInp(()=>st.seconds,v=>st.seconds=v,{type:'number',ph:'秒'})));
-      fb.appendChild(row2_(
-        wf_('工程猶予（日数）',makeInp(()=>st.schedDays,v=>{st.schedDays=v;refreshMergeInd();},{type:'number',ph:'日'}))
-      ));
-      fb.appendChild(
-        wf_('確定工程猶予（日数）',makeInp(()=>st.fixedDays,v=>st.fixedDays=v,{type:'number',ph:'日'}))
-      );
-      fb.appendChild(wf_('備考',makeInp(()=>st.note,v=>st.note=v,{ph:'備考'})));
-      sd.appendChild(fb);
+      // ── コンパクト2列グリッドレイアウト
+      const grid=document.createElement('div');
+      grid.style.cssText='display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px';
+
+      function miniField(label,getter,setter,opts={}){
+        const w=document.createElement('div');
+        const lb=document.createElement('div');
+        lb.style.cssText='font-size:8.5px;color:var(--text3);margin-bottom:2px;font-weight:600';
+        lb.textContent=label;
+        const inp=makeInp(getter,setter,{...opts,fieldLabel:label});
+        inp.style.cssText=(inp.style.cssText||'')+'padding:4px 6px;font-size:11px;height:28px';
+        w.appendChild(lb);w.appendChild(inp);
+        return w;
+      }
+      grid.appendChild(miniField('協力先',()=>st.outsource,v=>st.outsource=v,{ph:'外注先'}));
+      grid.appendChild(miniField('段取り時間(分)',()=>st.setupMins,v=>st.setupMins=v,{type:'number',ph:'分'}));
+      grid.appendChild(miniField('作業時間(秒)',()=>st.seconds,v=>st.seconds=v,{type:'number',ph:'秒'}));
+
+      const grid2=document.createElement('div');
+      grid2.style.cssText='display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-top:4px';
+      grid2.appendChild(miniField('確定猶予(日)',()=>st.fixedDays,v=>{st.fixedDays=v;refreshMergeInd();},{type:'number',ph:'日'}));
+      grid2.appendChild(miniField('備考',()=>st.note,v=>st.note=v,{ph:'備考'}));
+
+      sd.appendChild(grid);
+      sd.appendChild(grid2);
       stepsArea.appendChild(sd);
     });
 
@@ -2146,7 +2420,7 @@ function mkParentCard(proc,pi,mergedParts,f,parents,el){
     addSt.style.cssText='width:100%;padding:9px;font-size:11px;font-weight:700;font-family:inherit;cursor:pointer;border:none;border-bottom:1px solid var(--border);background:var(--surface2);color:var(--sky);display:flex;align-items:center;justify-content:center;gap:5px';
     addSt.innerHTML='＋ 工程ステップを追加';
     addSt.addEventListener('click',()=>{
-      proc.steps.push({id:procId(),name:'',outsource:'',seconds:'',schedDays:'',schedActual:'',fixedDays:'',fixedActual:'',note:''});
+      proc.steps.push({id:procId(),name:'',outsource:'',setupMins:'',seconds:'',fixedDays:'',note:''});
       redrawParentSteps();
     });
     stepsArea.appendChild(addSt);
@@ -2156,17 +2430,19 @@ function mkParentCard(proc,pi,mergedParts,f,parents,el){
     const pts=f.processes.filter(p=>p.type==='part');
     const merging=pts.filter(pt=>(pt.steps||[]).slice(-1)[0]?.mergeToParentId===proc.id);
     if(!merging.length){mergeInd.style.display='none';return;}
-    const pTotal=parentTotalDays(proc);
+    const limit=totalDaysBeforeParent(f, proc.id);
+    const parents=f.processes.filter(p=>p.type==='parent');
+    const parIdx=parents.findIndex(p=>p.id===proc.id);
     let bad=false;
     const rows=merging.map(pt=>{
       const cTotal=partTotalDays(pt);
-      const over=pTotal>0&&cTotal>pTotal;
+      const over=parIdx>0&&limit>0&&cTotal>limit;
       if(over)bad=true;
-      return `<div style="color:${over?'var(--red)':'var(--green2)'}">　${over?'⚠️':'✅'} ${esc(pt.name||'（名称未入力）')}: 子計${cTotal}日 ${over?'> 超過':'≤ OK'}</div>`;
+      return `<div style="color:${over?'var(--red)':'var(--green2)'}">　${over?'⚠️':'✅'} ${esc(pt.name||'（名称未入力）')}: 子計${cTotal}日 ${parIdx===0?'（前工程なし）':over?`> 前工程合計${limit}日 超過`:`≤ 前工程合計${limit}日 OK`}</div>`;
     }).join('');
     mergeInd.style.display='block';
     mergeInd.style.cssText=`font-size:11px;padding:7px 14px;display:block;border-top:1px solid var(--border);background:${bad?'rgba(198,40,40,0.06)':'rgba(27,94,32,0.05)'};`;
-    mergeInd.innerHTML=`<div style="font-weight:700;color:${bad?'var(--red)':'var(--green2)'};margin-bottom:2px">${bad?'⚠️ 工程猶予超過あり':'✅ 合流チェック OK'} — 親工程合計: ${pTotal}日</div>`+rows;
+    mergeInd.innerHTML=`<div style="font-weight:700;color:${bad?'var(--red)':'var(--green2)'};margin-bottom:2px">${bad?'⚠️ 工程猶予超過あり':'✅ 合流チェック OK'} — 前工程合計: ${limit}日</div>`+rows;
   }
 
   redrawParentSteps();
@@ -2192,8 +2468,8 @@ function mkParentCard(proc,pi,mergedParts,f,parents,el){
   addPart.innerHTML='📦 ＋ 子部品を追加（この親工程に合流）';
   addPart.addEventListener('click',()=>{
     f.processes.push({id:procId(),type:'part',name:'',
-      steps:[{id:procId(),name:'',outsource:'',seconds:'',schedDays:'',schedActual:'',fixedDays:'',fixedActual:'',note:'',mergeToParentId:proc.id}]});
-    drawSec7(f,el);
+      steps:[{id:procId(),name:'',outsource:'',setupMins:'',seconds:'',fixedDays:'',note:'',mergeToParentId:proc.id}]});
+    drawSec7inner(f,el);
   });
   card.appendChild(addPart);
 
@@ -2217,70 +2493,71 @@ function mkParentCard(proc,pi,mergedParts,f,parents,el){
 // ── 子部品カード
 function mkPartCard(part,xi,f,parents,el){
   const card=document.createElement('div');
-  card.style.cssText='border:1.5px solid rgba(201,168,76,0.3);border-radius:var(--r2);margin-bottom:8px;overflow:hidden;background:var(--surface)';
+  // 鮮やかな緑系ボーダー
+  card.style.cssText='border:2px solid #16a34a;border-radius:var(--r2);margin-bottom:8px;overflow:hidden;background:#f0fdf4';
 
-  // 子部品ヘッダー
+  // 子部品ヘッダー（緑）
   const hdr=document.createElement('div');
-  hdr.style.cssText='background:linear-gradient(100deg,rgba(201,168,76,0.18),rgba(201,168,76,0.06));padding:9px 13px;display:flex;align-items:center;gap:8px;border-bottom:1px solid rgba(201,168,76,0.18)';
+  hdr.style.cssText='background:linear-gradient(100deg,#16a34a,#22c55e);padding:7px 11px;display:flex;align-items:center;gap:8px;border-bottom:2px solid #15803d';
   const badge=document.createElement('div');
-  badge.style.cssText='width:22px;height:22px;border-radius:6px;background:linear-gradient(135deg,var(--gold),var(--gold2));color:var(--bg1);font-size:9.5px;font-weight:900;display:flex;align-items:center;justify-content:center;flex-shrink:0';
+  badge.style.cssText='width:24px;height:24px;border-radius:6px;background:white;color:#16a34a;font-size:9.5px;font-weight:900;display:flex;align-items:center;justify-content:center;flex-shrink:0;border:1.5px solid rgba(255,255,255,0.6)';
   badge.textContent='P'+String(xi+1).padStart(2,'0');
   const nm=document.createElement('input');
-  nm.style.cssText='flex:1;background:rgba(201,168,76,0.07);border:1px solid rgba(201,168,76,0.25);border-radius:8px;padding:6px 10px;color:var(--text);font-size:12.5px;font-weight:700;font-family:inherit;min-width:0';
+  nm.style.cssText='flex:1;background:rgba(255,255,255,0.25);border:1px solid rgba(255,255,255,0.5);border-radius:8px;padding:5px 9px;color:white;font-size:12px;font-weight:700;font-family:inherit;min-width:0';
   nm.placeholder='子部品名（例: ブラケット・パネルA）';nm.value=part.name||'';
   nm.addEventListener('input',e=>part.name=e.target.value);
   const del=document.createElement('button');
   del.innerHTML='✕';
-  del.style.cssText='background:rgba(198,40,40,0.1);border:1px solid rgba(198,40,40,0.28);color:var(--red);border-radius:7px;padding:5px 9px;cursor:pointer;font-size:11px;flex-shrink:0';
+  del.style.cssText='background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.4);color:white;border-radius:7px;padding:4px 9px;cursor:pointer;font-size:11px;flex-shrink:0';
   del.addEventListener('click',()=>{
     if(!confirm('この子部品を削除しますか？')) return;
     f.processes=f.processes.filter(p=>p.id!==part.id);
-    drawSec7(f,el);
+    drawSec7inner(f,el);
   });
   hdr.appendChild(badge);hdr.appendChild(nm);hdr.appendChild(del);
   card.appendChild(hdr);
 
   // 工程ステップ
   const stWrap=document.createElement('div');
-  stWrap.style.cssText='padding:7px 12px 4px';
+  stWrap.style.cssText='padding:5px 10px 4px;background:#f0fdf4';
   card.appendChild(stWrap);
 
-  // 合計バー
+  // 合計バー（緑）
   const totalBar=document.createElement('div');
-  totalBar.style.cssText='padding:6px 12px;background:var(--surface2);border-top:1px solid var(--border);font-size:11px;color:var(--text2)';
+  totalBar.style.cssText='padding:4px 10px;background:#dcfce7;border-top:1px solid #86efac;font-size:11px;color:#15803d';
   card.appendChild(totalBar);
 
   function refreshTotalBar(){
     const t=partTotalDays(part);
-    totalBar.innerHTML=`📊 合計工程猶予: <strong style="color:var(--sky);font-size:13px">${t}</strong> 日`;
+    totalBar.innerHTML=`📊 合計工程猶予: <strong style="color:#16a34a;font-size:13px">${t}</strong> 日`;
   }
 
   function redrawSteps(){
     stWrap.innerHTML='';
     if(!part.steps||!part.steps.length)
-      part.steps=[{id:procId(),name:'',outsource:'',seconds:'',schedDays:'',schedActual:'',fixedDays:'',fixedActual:'',note:'',mergeToParentId:''}];
+      part.steps=[{id:procId(),name:'',outsource:'',setupMins:'',seconds:'',fixedDays:'',note:'',mergeToParentId:''}];
 
     part.steps.forEach((st,si)=>{
       const isLast=si===part.steps.length-1;
       const sd=document.createElement('div');
-      sd.style.cssText=`border:1px solid ${isLast?'rgba(21,101,192,0.28)':'var(--border)'};border-radius:var(--r);margin-bottom:7px;overflow:hidden;background:${isLast?'rgba(21,101,192,0.025)':'white'}`;
+      sd.style.cssText=`border:1.5px solid ${isLast?'#2563eb':'#86efac'};border-radius:var(--r);margin-bottom:5px;overflow:hidden;background:${isLast?'#eff6ff':'white'}`;
 
       // ステップヘッダー
       const sh=document.createElement('div');
-      sh.style.cssText=`padding:7px 11px;display:flex;align-items:center;gap:7px;background:${isLast?'rgba(21,101,192,0.07)':'var(--surface2)'};border-bottom:1px solid var(--border)`;
+      sh.style.cssText=`padding:5px 9px;display:flex;align-items:center;gap:6px;background:${isLast?'#dbeafe':'#dcfce7'};border-bottom:1px solid ${isLast?'#93c5fd':'#86efac'}`;
       const snum=document.createElement('span');
-      snum.style.cssText='font-size:9px;font-weight:700;font-family:JetBrains Mono,monospace;color:var(--text3)';
+      snum.style.cssText=`font-size:9px;font-weight:700;font-family:JetBrains Mono,monospace;color:${isLast?'#1d4ed8':'#15803d'}`;
       snum.textContent='STEP '+String(si+1).padStart(2,'0');
       if(isLast){
         const tag=document.createElement('span');
-        tag.style.cssText='font-size:9px;background:rgba(21,101,192,0.14);color:var(--sky);border:1px solid rgba(21,101,192,0.28);border-radius:7px;padding:1px 6px;font-weight:700;white-space:nowrap';
+        tag.style.cssText='font-size:9px;background:#2563eb;color:white;border-radius:6px;padding:1px 6px;font-weight:700;white-space:nowrap';
         tag.textContent='最終工程';
         sh.appendChild(snum);sh.appendChild(tag);
       } else {
         sh.appendChild(snum);
       }
       const snm=document.createElement('input');
-      snm.style.cssText='flex:1;background:transparent;border:none;color:var(--text);font-size:11.5px;font-weight:600;font-family:inherit;min-width:0;outline:none';
+      snm.style.cssText='flex:1;background:transparent;border:none;color:var(--text);font-size:11px;font-weight:600;font-family:inherit;min-width:0;outline:none';
       snm.placeholder='工程名（自由記入）';snm.value=st.name||'';
       snm.addEventListener('input',e=>st.name=e.target.value);
       sh.appendChild(snm);
@@ -2288,7 +2565,6 @@ function mkPartCard(part,xi,f,parents,el){
         const ds=document.createElement('button');ds.innerHTML='✕';
         ds.style.cssText='background:transparent;border:none;color:var(--text4);cursor:pointer;font-size:11px;flex-shrink:0;padding:2px 4px';
         ds.addEventListener('click',()=>{
-          // 最終ステップを削除する場合、合流設定を前のステップが引き継ぐ
           if(isLast&&part.steps.length>=2){
             part.steps[part.steps.length-2].mergeToParentId=st.mergeToParentId||'';
           }
@@ -2299,17 +2575,32 @@ function mkPartCard(part,xi,f,parents,el){
       }
       sd.appendChild(sh);
 
-      // フィールド
-      const sb=document.createElement('div');sb.style.cssText='padding:9px 11px;display:flex;flex-direction:column;gap:7px';
-      sb.appendChild(wf_('協力先',makeInp(()=>st.outsource,v=>st.outsource=v,{ph:'外注先・協力会社（自由記入）'})));
-      sb.appendChild(wf_('作業時間（秒）',makeInp(()=>st.seconds,v=>st.seconds=v,{type:'number',ph:'秒'})));
-      sb.appendChild(row2_(
-        wf_('工程猶予（日数）',makeInp(()=>st.schedDays,v=>{st.schedDays=v;refreshTotalBar();if(isLast&&st.mergeToParentId)chkMerge(st,warnEl);},{type:'number',ph:'日'}))
-      ));
-      sb.appendChild(
-        wf_('確定工程猶予（日数）',makeInp(()=>st.fixedDays,v=>st.fixedDays=v,{type:'number',ph:'日'}))
-      );
-      sb.appendChild(wf_('備考',makeInp(()=>st.note,v=>st.note=v,{ph:'備考'})));
+      // ── コンパクト3列グリッド
+      const sb=document.createElement('div');sb.style.cssText='padding:5px 9px;background:inherit';
+
+      function miniField(label,getter,setter,opts={}){
+        const w=document.createElement('div');
+        const lb=document.createElement('div');
+        lb.style.cssText='font-size:8.5px;color:#166534;margin-bottom:2px;font-weight:600';
+        lb.textContent=label;
+        const inp=makeInp(getter,setter,{...opts,fieldLabel:label});
+        inp.style.cssText=(inp.style.cssText||'')+'padding:4px 6px;font-size:11px;height:28px';
+        w.appendChild(lb);w.appendChild(inp);
+        return w;
+      }
+
+      const g1=document.createElement('div');
+      g1.style.cssText='display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:4px';
+      g1.appendChild(miniField('協力先',()=>st.outsource,v=>st.outsource=v,{ph:'外注先'}));
+      g1.appendChild(miniField('段取り時間(分)',()=>st.setupMins,v=>st.setupMins=v,{type:'number',ph:'分'}));
+      g1.appendChild(miniField('作業時間(秒)',()=>st.seconds,v=>st.seconds=v,{type:'number',ph:'秒'}));
+
+      const g2=document.createElement('div');
+      g2.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:4px';
+      g2.appendChild(miniField('確定猶予(日)',()=>st.fixedDays,v=>{st.fixedDays=v;refreshTotalBar();if(isLast&&st.mergeToParentId)chkMerge(st,warnEl);},{type:'number',ph:'日'}));
+      g2.appendChild(miniField('備考',()=>st.note,v=>st.note=v,{ph:'備考'}));
+
+      sb.appendChild(g1);sb.appendChild(g2);
 
       // 合流先選択（最終ステップのみ）
       const warnEl=document.createElement('div');
@@ -2344,11 +2635,11 @@ function mkPartCard(part,xi,f,parents,el){
               st.mergeToParentId=prev;
               msel.value=prev||'';
             } else {
-              drawSec7(f,el); // 親カードのサマリ更新
+              drawSec7inner(f,el); // 親カードのサマリ更新
             }
           } else {
             warnEl.style.display='none';
-            drawSec7(f,el);
+            drawSec7inner(f,el);
           }
         });
         mw.appendChild(msel);
@@ -2369,7 +2660,7 @@ function mkPartCard(part,xi,f,parents,el){
       const prevLast=part.steps[part.steps.length-1];
       const prevMerge=prevLast?prevLast.mergeToParentId:'';
       if(prevLast) prevLast.mergeToParentId='';
-      part.steps.push({id:procId(),name:'',outsource:'',seconds:'',schedDays:'',schedActual:'',fixedDays:'',fixedActual:'',note:'',mergeToParentId:prevMerge});
+      part.steps.push({id:procId(),name:'',outsource:'',setupMins:'',seconds:'',fixedDays:'',note:'',mergeToParentId:prevMerge});
       redrawSteps();refreshTotalBar();
     });
     stWrap.appendChild(addSt);
@@ -2379,21 +2670,38 @@ function mkPartCard(part,xi,f,parents,el){
   function chkMerge(lastStep,warnEl){
     const par=f.processes.find(p=>p.id===lastStep.mergeToParentId&&p.type==='parent');
     if(!par){warnEl.style.display='none';return true;}
-    const pd=parentTotalDays(par);
+    // 合流先の「前」の親工程合計猶予が上限
+    const limit=totalDaysBeforeParent(f, par.id);
     const cd=partTotalDays(part);
-    if(pd===0){
-      warnEl.style.display='block';warnEl.style.background='rgba(245,127,23,0.1)';warnEl.style.border='1px solid rgba(245,127,23,0.3)';warnEl.style.color='var(--amber)';
-      warnEl.innerHTML='⚠️ 合流先の親工程猶予が未入力です。先に親工程の工程猶予を入力してください。';
+    const parents=f.processes.filter(p=>p.type==='parent');
+    const parIdx=parents.findIndex(p=>p.id===par.id);
+    if(parIdx===0){
+      warnEl.style.display='block';
+      warnEl.style.cssText='margin-top:6px;padding:7px 9px;border-radius:8px;font-size:11px;display:block;background:rgba(245,127,23,0.1);border:1px solid rgba(245,127,23,0.3);color:var(--amber)';
+      warnEl.innerHTML=`⚠️ 合流先「${esc(par.name||'親工程')}」は最初の親工程のため、前工程がありません。合流先を2番目以降の親工程に変更してください。`;
       return true;
     }
-    if(cd>pd){
-      warnEl.style.display='block';warnEl.style.background='rgba(198,40,40,0.07)';warnEl.style.border='1px solid rgba(198,40,40,0.3)';warnEl.style.color='var(--red)';
-      warnEl.innerHTML=`🚫 <strong>登録不可</strong>：子部品合計 <strong>${cd}日</strong> ＞ 合流先「${esc(par.name||'親工程')}」合計猶予 <strong>${pd}日</strong><br>子部品の工程猶予合計を ${pd}日以内に調整してください。`;
-      showToast('工程猶予超過のため合流設定できません','err');
+    if(limit===0){
+      warnEl.style.display='block';
+      warnEl.style.cssText='margin-top:6px;padding:7px 9px;border-radius:8px;font-size:11px;display:block;background:rgba(245,127,23,0.1);border:1px solid rgba(245,127,23,0.3);color:var(--amber)';
+      warnEl.innerHTML=`⚠️ 合流先より前の親工程に工程猶予が入力されていません。先に前工程の確定猶予を入力してください。`;
+      return true;
+    }
+    // 前工程リスト表示用
+    const prevNames=parents.slice(0,parIdx).map((p,i)=>`${String(i+1).padStart(2,'0')} ${esc(p.name||'（名称未入力）')} ${parentTotalDays(p)}日`).join('、');
+    if(cd>limit){
+      warnEl.style.display='block';
+      warnEl.style.cssText='margin-top:6px;padding:7px 9px;border-radius:8px;font-size:11px;display:block;background:rgba(198,40,40,0.07);border:1px solid rgba(198,40,40,0.3);color:var(--red)';
+      warnEl.innerHTML=`🚫 <strong>登録不可</strong>：子部品合計 <strong>${cd}日</strong> ＞ 合流先前工程合計 <strong>${limit}日</strong><br>
+        <span style="font-size:10px">前工程: ${prevNames}</span><br>
+        子部品の確定猶予合計を <strong>${limit}日以内</strong>に調整してください。`;
+      showToast('前工程合計を超えるため合流設定できません','err');
       return false;
     }
-    warnEl.style.display='block';warnEl.style.background='rgba(27,94,32,0.07)';warnEl.style.border='1px solid rgba(46,125,50,0.3)';warnEl.style.color='var(--green2)';
-    warnEl.innerHTML=`✅ OK：子部品合計 <strong>${cd}日</strong> ≤ 合流先合計猶予 <strong>${pd}日</strong>`;
+    warnEl.style.display='block';
+    warnEl.style.cssText='margin-top:6px;padding:7px 9px;border-radius:8px;font-size:11px;display:block;background:rgba(27,94,32,0.07);border:1px solid rgba(46,125,50,0.3);color:var(--green2)';
+    warnEl.innerHTML=`✅ OK：子部品合計 <strong>${cd}日</strong> ≤ 合流先前工程合計 <strong>${limit}日</strong>
+      <span style="font-size:10px;display:block;margin-top:2px">前工程: ${prevNames}</span>`;
     return true;
   }
 
@@ -2470,7 +2778,7 @@ function buildSec9(){
   w.appendChild(warn);return w;
 }
 function renderSection(i){
-  const builders=[buildSec1,buildSec2,buildSec3,buildSec4,buildSec5,buildSec6,buildSec7,buildSec8,buildSec9];
+  const builders=[buildSec1,buildSec2,buildSec3,buildSec4,buildSec5,buildSec7,buildSec6,buildSec8,buildSec9];
   const container=document.getElementById('form-sec-content');
   container.innerHTML='';container.appendChild(builders[i]());
 }
@@ -2480,7 +2788,7 @@ function renderSection(i){
 // ══════════════════════════════════════════════════════
 async function handleSave(){
   const f=formRec;
-  if(!f.customer||!f.productName){showToast('⚠️ 顧客名・品名は必須です','err');return;}
+  if(!f.customer||(f.productNames||[]).every(n=>!n.trim())){showToast('⚠️ 顧客名・品名は必須です','err');return;}
   if(!currentUser){showToast('保存にはログインが必要です','err');openLoginSheet();return;}
   f.updatedAt=new Date().toISOString();
   f.updatedBy=currentUser.name;
@@ -2508,7 +2816,7 @@ function openDetail(id){
   const rec=records.find(r=>r.id===id);
   if(!rec) return;
   detailRec=rec;
-  document.getElementById('det-title').textContent=rec.productName||'議事録詳細';
+  document.getElementById('det-title').textContent=(rec.productNames||[rec.productName||'']).filter(Boolean).join(' / ')||'議事録詳細';
   document.getElementById('det-sub').textContent=rec.customer||'';
   renderDetail(rec); showView('detail');
 }
@@ -2522,7 +2830,7 @@ function renderDetail(d){
   let html=`<div class="det-sec"><div class="det-hdr">📋 基本情報</div>
     ${row('日時',(d.meetingDate||'—')+' '+(d.meetingTime||''))}
     ${row('場所',d.place)}${row('種別',d.type)}${row('顧客名',d.customer)}
-    ${row('品名',d.productName)}${row('品番',d.productNo)}
+    ${row('品名',(d.productNames||[d.productName||'']).filter(Boolean).join(' / '))}${row('品番',(d.productNos||[d.productNo||'']).filter(Boolean).join(' / '))}
     ${row('試作数',d.trialQty?d.trialQty+' 個':'')}
     ${row('量産数',d.massQty?d.massQty+' 個/回':'')}
     ${row('管理番号',d.controlNo)}
@@ -2530,7 +2838,19 @@ function renderDetail(d){
     ${row('作成者',d.createdBy)}
   </div>`;
   html+=`<div class="det-sec"><div class="det-hdr">📄 図面・書類確認</div>
-    ${DOC_META.map(({key,label})=>d.docs[key]?.val?`<div class="det-row"><div class="det-k">${label}</div><div class="det-v">${badge(d.docs[key].val,'doc')}${d.docs[key].note?'<span style="margin-left:6px;font-size:11px;color:var(--text2)">'+esc(d.docs[key].note)+'</span>':''}</div></div>`:'').join('')}
+    ${DOC_META.map(({key,label})=>{
+      const docVal=d.docs[key];
+      const atts=(d.docAttachments||{})[key]||[];
+      const attHtml=atts.length?`<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">${atts.map(att=>{
+        if(att.type&&att.type.startsWith('image/')){
+          return `<img src="${att.data}" style="width:60px;height:40px;object-fit:cover;border-radius:4px;border:1px solid var(--border);cursor:pointer" onclick="window.open('${att.data}')">`;
+        }
+        const ext=(att.name||'').split('.').pop().toLowerCase();
+        const iconMap={pdf:'🔴',xlsx:'🟢',xls:'🟢',docx:'🔵',doc:'🔵',csv:'🟡',zip:'🟠'};
+        return `<a href="${att.data}" download="${esc(att.name||'file')}" style="display:inline-flex;align-items:center;gap:3px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:3px 7px;font-size:10px;color:var(--sky);text-decoration:none">${iconMap[ext]||'📄'} ${esc(att.name||'file')}</a>`;
+      }).join('')}</div>`:'';
+      return docVal?.val?`<div class="det-row"><div class="det-k">${label}</div><div class="det-v">${badge(docVal.val,'doc')}${docVal.note?'<span style="margin-left:6px;font-size:11px;color:var(--text2)">'+esc(docVal.note)+'</span>':''}${attHtml}</div></div>`:'';
+    }).join('')}
   </div>`;
   html+=`<div class="det-sec"><div class="det-hdr">✅ 承認事項</div>
     ${APPR_META.map(({key,label})=>(d.approvals[key]?.sales||d.approvals[key]?.mgmt)?`<div class="det-row"><div class="det-k">${label}</div><div class="det-v">${d.approvals[key].sales?'<span style="font-size:10px;color:var(--text2)">営</span>'+badge(d.approvals[key].sales,'appr'):''}${d.approvals[key].mgmt?' <span style="font-size:10px;color:var(--text2)">管</span>'+badge(d.approvals[key].mgmt,'appr'):''}</div></div>`:'').join('')}
@@ -2657,7 +2977,7 @@ function printRegistry(){
       <td style="text-align:center;font-family:monospace">${esc(d.controlNo||'─')}</td>
       <td>${esc(d.meetingDate||'─')}</td>
       <td>${esc(d.customer||'─')}</td>
-      <td><strong>${esc(d.productName||'─')}</strong></td>
+      <td><strong>${esc((d.productNames||[d.productName||'']).filter(Boolean).join(' / ')||'─')}</strong></td>
       <td>${esc(d.productNo||'─')}</td>
       <td style="text-align:center"><span style="background:${d.type==='試作'?'rgba(0,150,180,0.12)':'rgba(230,81,0,0.12)'};color:${d.type==='試作'?'#006979':'#E65100'};border-radius:8px;padding:2px 8px;font-size:9pt;font-weight:700">${esc(d.type||'─')}</span></td>
       <td style="text-align:center">${d.delivery?.trial?.dec||'─'}</td>
@@ -2724,7 +3044,7 @@ function doPrint(id){
       </div>`;
     }
   }).join('');
-  const html=`<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><title>初品議事録 - ${esc(d.customer)} - ${esc(d.productName)}</title>
+  const html=`<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><title>初品議事録 - ${esc(d.customer)} - ${esc((d.productNames||[d.productName||'']).filter(Boolean).join(' / '))}</title>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;900&family=Shippori+Mincho:wght@400;700&display=swap" rel="stylesheet">
 <style>
 body{font-family:'Noto Sans JP',sans-serif;font-size:9pt;color:#111;background:white;margin:0}
@@ -2772,8 +3092,8 @@ tr:nth-child(even) td{background:#f5f7fb}
   <div class="irow"><div class="ik">場所</div><div class="iv">${esc(d.place)||'—'}</div></div>
   <div class="irow"><div class="ik">種別</div><div class="iv">${esc(d.type)||'—'}</div></div>
   <div class="irow"><div class="ik">顧客名</div><div class="iv">${esc(d.customer)||'—'}</div></div>
-  <div class="irow"><div class="ik">品名</div><div class="iv">${esc(d.productName)||'—'}</div></div>
-  <div class="irow"><div class="ik">品番</div><div class="iv">${esc(d.productNo)||'—'}</div></div>
+  <div class="irow"><div class="ik">品名</div><div class="iv">${esc((d.productNames||[d.productName||'']).filter(Boolean).join(' / '))||'—'}</div></div>
+  <div class="irow"><div class="ik">品番</div><div class="iv">${esc((d.productNos||[d.productNo||'']).filter(Boolean).join(' / '))||'—'}</div></div>
 </div>
 <div class="iblk">
   <div class="irow"><div class="ik">部品種類数</div><div class="iv">${esc(d.partsCount)||'—'} 種</div></div>
@@ -2784,7 +3104,17 @@ tr:nth-child(even) td{background:#f5f7fb}
 </div></div>
 <div class="sec">■ 図面・書類確認</div>
 <table><tr><th>確認項目</th><th width="60">有/無</th><th>備考</th></tr>
-${DOC_META.map(({key,label})=>`<tr><td>${label}</td><td style="text-align:center">${yn(d.docs[key]?.val)}</td><td>${esc(d.docs[key]?.note||'')}</td></tr>`).join('')}
+${DOC_META.map(({key,label})=>{
+  const atts=(d.docAttachments||{})[key]||[];
+  const attCells=atts.length?atts.map(att=>{
+    if(att.type&&att.type.startsWith('image/')){
+      return `<img src="${att.data}" style="height:40px;border-radius:3px;border:1px solid #ccd5e3;margin-right:3px">`;
+    }
+    const ext=(att.name||'').split('.').pop().toLowerCase();
+    return `<span style="font-size:8pt;background:#f0f4ff;border:1px solid #ccd5e3;border-radius:3px;padding:1px 5px">${ext} ${esc(att.name||'')}</span>`;
+  }).join(' '):'';
+  return `<tr><td>${label}</td><td style="text-align:center">${yn(d.docs[key]?.val)}</td><td>${esc(d.docs[key]?.note||'')}${attCells?'<br>'+attCells:''}</td></tr>`;
+}).join('')}
 </table>
 <div class="sec">■ 承認事項</div>
 <table><tr><th>承認項目</th><th width="80">営業部</th><th width="80">管理部</th><th>備考</th></tr>
@@ -2815,10 +3145,10 @@ ${(()=>{
     const children=procs.filter(c=>c.type==='child'&&c.parentId===pp.id);
     const secColor='#e8eef8';
     let html=`<table style="margin-bottom:4px"><tr><th colspan="7" style="background:#1d3470;font-size:9pt">📦 ${String(pi+1).padStart(2,'0')} ${esc(pp.name)||'（工程名なし）'}</th></tr>
-    <tr><th>区分</th><th>協力先</th><th>作業時間(秒)</th><th>工程猶予(日)</th><th>確定工程猶予(日)</th></tr>
-    <tr style="background:${secColor}"><td><strong>親工程</strong></td><td>${esc(pp.outsource)||'—'}</td><td style="text-align:center">${esc(pp.seconds)||'—'}</td><td style="text-align:center">${esc(pp.schedDays)||'—'}</td><td style="text-align:center">${esc(pp.fixedDays)||'—'}</td></tr>`;
+    <tr><th>区分</th><th>協力先</th><th>作業時間(秒)</th><th>確定猶予(日)</th></tr>
+    <tr style="background:${secColor}"><td><strong>親工程</strong></td><td>${esc(pp.outsource)||'—'}</td><td style="text-align:center">${esc(pp.seconds)||'—'}</td><td style="text-align:center">${esc(pp.fixedDays)||'—'}</td></tr>`;
     children.forEach((ch,ci)=>{
-      html+=`<tr><td style="padding-left:18px">└ 子 ${String(ci+1).padStart(2,'00')} ${esc(ch.name)||'─'}</td><td>${esc(ch.outsource)||'—'}</td><td style="text-align:center">${esc(ch.seconds)||'—'}</td><td style="text-align:center">${esc(ch.schedDays)||'—'}</td><td style="text-align:center">${esc(ch.fixedDays)||'—'}</td></tr>`;
+      html+=`<tr><td style="padding-left:18px">└ 子 ${String(ci+1).padStart(2,'00')} ${esc(ch.name)||'─'}</td><td>${esc(ch.outsource)||'—'}</td><td style="text-align:center">${esc(ch.seconds)||'—'}</td><td style="text-align:center">${esc(ch.fixedDays)||'—'}</td></tr>`;
     });
     html+=`</table>`;
     return html;
@@ -2847,8 +3177,214 @@ ${[...d.editLog].reverse().map(l=>{
 }
 
 // ══════════════════════════════════════════════════════
-// TOAST
+// BOM 専用 PDF出力
 // ══════════════════════════════════════════════════════
+function printBomPdf(f){
+  const procs=f.processes||[];
+  const parents=procs.filter(p=>p.type==='parent');
+  const parts  =procs.filter(p=>p.type==='part');
+  if(!parents.length){showToast('工程が登録されていません','err');return;}
+
+  // 前工程合計猶予を計算
+  function limitFor(parentId){
+    return totalDaysBeforeParent(f, parentId);
+  }
+
+  // 各親工程に合流する子部品
+  function childrenOf(parentId){
+    return parts.filter(pt=>(pt.steps||[]).slice(-1)[0]?.mergeToParentId===parentId);
+  }
+
+  const title=esc(f.customer||'')+((f.productNames||[f.productName||'']).filter(Boolean).length?` ／ ${esc((f.productNames||[f.productName||'']).filter(Boolean).join(' / '))}`:'');
+  const ctrlNo=esc(f.controlNo||'');
+  const today=new Date();
+  const dateStr=`${today.getFullYear()}/${today.getMonth()+1}/${today.getDate()}`;
+
+  // 累計猶予バー用の全体合計
+  const grandTotal=parents.reduce((s,p)=>s+parentTotalDays(p),0);
+
+  let rows='';
+  let cumulative=0;
+  parents.forEach((pp,pi)=>{
+    const pTotal=parentTotalDays(pp);
+    const cumulativePrev=cumulative;
+    cumulative+=pTotal;
+    const pct=grandTotal>0?Math.round(pTotal/grandTotal*100):0;
+    const cumPct=grandTotal>0?Math.round(cumulative/grandTotal*100):0;
+    const children=childrenOf(pp.id);
+    const limit=limitFor(pp.id);
+
+    // 親工程行
+    rows+=`<tr class="parent-row">
+      <td class="no-cell">${String(pi+1).padStart(2,'0')}</td>
+      <td class="type-cell parent-type">親工程</td>
+      <td class="name-cell"><strong>${esc(pp.name)||'（名称未入力）'}</strong>
+        ${pp.steps&&pp.steps.length>1?`<span class="step-count">${pp.steps.length}ステップ</span>`:''}
+      </td>
+      <td class="num-cell">${pTotal||'—'}</td>
+      <td class="num-cell cumul">${cumulative}</td>
+      <td class="bar-cell"><div class="bar-wrap"><div class="bar-fill parent-bar" style="width:${pct}%;margin-left:${grandTotal>0?Math.round(cumulativePrev/grandTotal*100):0}%"></div></div></td>
+      <td class="note-cell">—</td>
+    </tr>`;
+
+    // 子部品行
+    children.forEach((pt,xi)=>{
+      const cTotal=partTotalDays(pt);
+      const ok=limit===0||cTotal<=limit;
+      const ptPct=grandTotal>0?Math.round(cTotal/grandTotal*100):0;
+      rows+=`<tr class="child-row ${ok?'child-ok':'child-ng'}">
+        <td class="no-cell"><span class="child-badge">P${String(xi+1).padStart(2,'0')}</span></td>
+        <td class="type-cell child-type">子部品</td>
+        <td class="name-cell child-name">└ ${esc(pt.name)||'（名称未入力）'}
+          <span class="merge-tag">▶ ${esc(pp.name||'合流先')}</span>
+        </td>
+        <td class="num-cell ${ok?'ok-text':'ng-text'}">${cTotal||'—'}</td>
+        <td class="num-cell limit-cell">≤ ${limit||'—'}</td>
+        <td class="bar-cell"><div class="bar-wrap"><div class="bar-fill child-bar" style="width:${ptPct}%"></div></div>
+          <span class="chk-icon">${ok?'✅':'⚠️'}</span>
+        </td>
+        <td class="note-cell ${ok?'':'ng-text'}">${ok?'OK':`超過 ${cTotal-limit}日`}</td>
+      </tr>`;
+      // 子部品ステップ詳細
+      (pt.steps||[]).forEach((st,si)=>{
+        const isLast=si===pt.steps.length-1;
+        rows+=`<tr class="step-row">
+          <td></td>
+          <td class="step-label">STEP ${String(si+1).padStart(2,'0')}${isLast?' 最終':''}</td>
+          <td class="step-name">${esc(st.name)||'─'}${st.outsource?` <em>(${esc(st.outsource)})</em>`:''}</td>
+          <td class="num-cell">${st.fixedDays||'—'}</td>
+          <td colspan="2" class="step-note">${st.note?esc(st.note):''}</td>
+        </tr>`;
+      });
+    });
+
+    // 親工程ステップ詳細（複数ステップのみ）
+    if(pp.steps&&pp.steps.length>1){
+      pp.steps.forEach((st,si)=>{
+        rows+=`<tr class="pstep-row">
+          <td></td>
+          <td class="step-label pstep-label">工程 ${String(si+1).padStart(2,'0')}</td>
+          <td class="step-name">${esc(st.name)||'─'}${st.outsource?` <em>(${esc(st.outsource)})</em>`:''}</td>
+          <td class="num-cell">${st.fixedDays||'—'}</td>
+          <td colspan="2" class="step-note">${st.note?esc(st.note):''}</td>
+        </tr>`;
+      });
+    }
+  });
+
+  // 孤立子部品
+  const orphans=parts.filter(pt=>{ const l=(pt.steps||[]).slice(-1)[0]; return !l||!l.mergeToParentId; });
+  if(orphans.length){
+    rows+=`<tr><td colspan="7" style="background:#fff3cd;color:#856404;font-weight:700;padding:6px 10px;font-size:9pt">⚠️ 合流先未設定の子部品</td></tr>`;
+    orphans.forEach((pt,xi)=>{
+      rows+=`<tr class="child-row child-ng"><td><span class="child-badge">P?</span></td><td class="child-type">子部品</td><td class="child-name">└ ${esc(pt.name)||'（名称未入力）'} <span style="color:#dc3545">合流先未設定</span></td><td colspan="4" style="color:#dc3545">要設定</td></tr>`;
+    });
+  }
+
+  const html=`<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8">
+<title>BOM工程一覧 - ${title}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Noto Sans JP',sans-serif;font-size:9pt;color:#1e293b;background:white;padding:12mm}
+@media print{body{padding:0} @page{size:A4;margin:12mm}}
+h1{font-size:14pt;color:#1d4ed8;margin-bottom:3px}
+.meta{font-size:8.5pt;color:#64748b;margin-bottom:10px;display:flex;gap:20px;flex-wrap:wrap}
+.meta span{display:flex;gap:4px}
+.meta strong{color:#1e293b}
+table{width:100%;border-collapse:collapse;font-size:8.5pt}
+th{background:#1d4ed8;color:white;padding:6px 7px;text-align:left;font-size:8pt;white-space:nowrap}
+td{padding:5px 7px;border-bottom:1px solid #e2e8f0;vertical-align:middle}
+.no-cell{width:36px;text-align:center;font-weight:700;font-family:monospace;color:#64748b}
+.type-cell{width:50px;text-align:center;font-size:7.5pt;white-space:nowrap}
+.num-cell{width:60px;text-align:center;font-weight:700}
+.bar-cell{width:110px;position:relative}
+.note-cell{width:55px;text-align:center;font-size:8pt}
+.name-cell{color:#1e293b}
+.parent-row{background:#eff6ff}
+.parent-row td{border-bottom:2px solid #bfdbfe}
+.parent-type{background:#2563eb;color:white;border-radius:4px;font-weight:700;font-size:7pt}
+.child-row td{background:#f0fdf4;font-size:8.5pt}
+.child-ok td{background:#f0fdf4}
+.child-ng td{background:#fef2f2}
+.child-type{background:#16a34a;color:white;border-radius:4px;font-weight:700;font-size:7pt;text-align:center}
+.child-name{padding-left:14px;color:#15803d}
+.child-badge{display:inline-block;background:#16a34a;color:white;border-radius:4px;font-size:7pt;font-weight:900;padding:1px 4px}
+.merge-tag{font-size:7.5pt;color:#0ea5e9;background:#e0f2fe;border-radius:3px;padding:1px 4px;margin-left:5px;white-space:nowrap}
+.step-row td{background:#fafafa;font-size:8pt;color:#475569}
+.step-label{color:#6366f1;font-weight:700;font-size:7.5pt;padding-left:18px;white-space:nowrap}
+.pstep-row td{background:#f8faff;font-size:8pt;color:#475569}
+.pstep-label{color:#1d4ed8;font-weight:700;font-size:7.5pt;padding-left:18px;white-space:nowrap}
+.step-name{color:#64748b}
+.step-note{color:#94a3b8;font-style:italic;font-size:7.5pt}
+.step-count{font-size:7.5pt;background:#dbeafe;color:#1d4ed8;border-radius:3px;padding:1px 5px;margin-left:6px}
+.ok-text{color:#16a34a}
+.ng-text{color:#dc2626;font-weight:700}
+.limit-cell{color:#64748b;font-size:8pt}
+.cumul{color:#2563eb}
+.bar-wrap{height:10px;background:#e2e8f0;border-radius:5px;overflow:hidden;position:relative}
+.bar-fill{height:100%;border-radius:5px;position:absolute;top:0}
+.parent-bar{background:linear-gradient(90deg,#2563eb,#60a5fa)}
+.child-bar{background:linear-gradient(90deg,#16a34a,#4ade80)}
+.chk-icon{font-size:9pt;margin-left:4px}
+.summary{margin-top:10px;display:flex;gap:10px;flex-wrap:wrap}
+.sum-box{border:1px solid #e2e8f0;border-radius:6px;padding:7px 12px;font-size:8.5pt;min-width:100px}
+.sum-box .label{color:#64748b;font-size:7.5pt;margin-bottom:2px}
+.sum-box .value{font-size:13pt;font-weight:900;color:#1d4ed8}
+.grand-bar{margin-top:8px;height:16px;background:#e2e8f0;border-radius:8px;overflow:hidden;display:flex}
+.gb-seg{height:100%;display:flex;align-items:center;justify-content:center;font-size:6.5pt;font-weight:700;color:white;white-space:nowrap;overflow:hidden;min-width:0}
+.footer{margin-top:10px;font-size:7.5pt;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:6px;display:flex;justify-content:space-between}
+</style></head><body>
+<h1>🏗️ BOM 工程一覧</h1>
+<div class="meta">
+  <span><strong>品名／顧客:</strong> ${title||'（未入力）'}</span>
+  <span><strong>管理番号:</strong> ${ctrlNo||'─'}</span>
+  <span><strong>出力日:</strong> ${dateStr}</span>
+  <span><strong>親工程数:</strong> ${parents.length}　子部品数: ${parts.length}</span>
+</div>
+
+<table>
+<tr>
+  <th class="no-cell">No.</th>
+  <th class="type-cell">種別</th>
+  <th>工程名 / 部品名</th>
+  <th class="num-cell">確定猶予(日)</th>
+  <th class="num-cell">上限/累計</th>
+  <th class="bar-cell">進捗バー</th>
+  <th class="note-cell">判定</th>
+</tr>
+${rows}
+<tr style="background:#1d4ed8;color:white">
+  <td colspan="3" style="font-weight:700;padding:6px 10px">合計工程猶予</td>
+  <td class="num-cell" style="color:white;font-size:11pt">${grandTotal}</td>
+  <td colspan="3" style="color:rgba(255,255,255,0.7);font-size:8pt">親工程累計 ${grandTotal}日</td>
+</tr>
+</table>
+
+<div class="summary">
+  <div class="sum-box"><div class="label">親工程数</div><div class="value" style="color:#2563eb">${parents.length}</div></div>
+  <div class="sum-box"><div class="label">子部品数</div><div class="value" style="color:#16a34a">${parts.length}</div></div>
+  <div class="sum-box"><div class="label">累計工程猶予</div><div class="value">${grandTotal}日</div></div>
+  <div class="sum-box"><div class="label">バリデーション</div><div class="value" style="color:${parts.some(pt=>{const l=(pt.steps||[]).slice(-1)[0];if(!l?.mergeToParentId)return false;const lim=totalDaysBeforeParent(f,l.mergeToParentId);return lim>0&&partTotalDays(pt)>lim;})?'#dc2626':'#16a34a'}">${parts.some(pt=>{const l=(pt.steps||[]).slice(-1)[0];if(!l?.mergeToParentId)return false;const lim=totalDaysBeforeParent(f,l.mergeToParentId);return lim>0&&partTotalDays(pt)>lim;})?'⚠️ 超過あり':'✅ 全OK'}</div></div>
+</div>
+
+<div class="grand-bar" style="margin-top:8px">
+  ${parents.map((pp,pi)=>{const pct=grandTotal>0?Math.round(parentTotalDays(pp)/grandTotal*100):0;const colors=['#1d4ed8','#0ea5e9','#6366f1','#8b5cf6','#ec4899','#f97316','#eab308','#22c55e'];return `<div class="gb-seg" style="width:${pct}%;background:${colors[pi%colors.length]}" title="${esc(pp.name||'')} ${parentTotalDays(pp)}日">${pct>8?esc((pp.name||'').slice(0,4)):''}</div>`;}).join('')}
+</div>
+<div style="font-size:7.5pt;color:#94a3b8;margin-top:2px">▲ 親工程別 工程猶予バー</div>
+
+<div class="footer">
+  <span>初品製作品 打ち合わせ議事録システム — BOM工程一覧</span>
+  <span>${dateStr} 出力</span>
+</div>
+<script>window.onload=()=>{window.print();}<\/script>
+</body></html>`;
+
+  const w=window.open('','_blank');
+  if(!w){alert('ポップアップを許可してください');return;}
+  w.document.write(html);w.document.close();
+}
+
+
 let _toastTimer=null;
 function showToast(msg,type='ok'){
   if(_toastTimer) clearTimeout(_toastTimer);
