@@ -11,8 +11,8 @@
 <meta name="theme-color" content="#0f2044">
 <meta name="description" content="初品製作品 打ち合わせ議事録システム">
 
-<!-- PWA マニフェスト（インライン） -->
-<link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22%E5%88%9D%E5%93%81%E8%A3%BD%E4%BD%9C%E5%93%81%20%E6%89%93%E3%81%A1%E5%90%88%E3%82%8F%E3%81%9B%E8%AD%B0%E4%BA%8B%E9%8C%B2%22%2C%22short_name%22%3A%22%E5%88%9D%E5%93%81%E8%AD%B0%E4%BA%8B%E9%8C%B2%22%2C%22description%22%3A%22%E5%88%9D%E5%93%81%E8%A3%BD%E4%BD%9C%E5%93%81%20%E6%89%93%E3%81%A1%E5%90%88%E3%82%8F%E3%81%9B%E8%AD%B0%E4%BA%8B%E9%8C%B2%E3%82%B7%E3%82%B9%E3%83%86%E3%83%A0%22%2C%22start_url%22%3A%22.%2F%22%2C%22display%22%3A%22standalone%22%2C%22orientation%22%3A%22portrait%22%2C%22background_color%22%3A%22%230f2044%22%2C%22theme_color%22%3A%22%230f2044%22%2C%22lang%22%3A%22ja%22%7D">
+<!-- PWA マニフェスト（外部ファイル） -->
+<link rel="manifest" href="manifest.json">
 
 <!-- Apple Touch Icons（SVGをbase64で埋め込み） -->
 <link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxOTIgMTkyIj48cmVjdCB3aWR0aD0iMTkyIiBoZWlnaHQ9IjE5MiIgcng9IjM4IiBmaWxsPSIjMGYyMDQ0Ii8+PHJlY3QgeD0iMjAiIHk9IjE4MCIgd2lkdGg9IjE1MiIgaGVpZ2h0PSI0IiByeD0iMiIgZmlsbD0iI2M5YTg0YyIvPjx0ZXh0IHg9Ijk2IiB5PSI4MCIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iNDgiIGZvbnQtd2VpZ2h0PSI5MDAiIGZpbGw9IndoaXRlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj7mm5Y8L3RleHQ+PHRleHQgeD0iOTYiIHk9IjEzNSIgZm9udC1mYW1pbHk9InNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMjAiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiNjOWE4NGMiIHRleHQtYW5jaG9yPSJtaWRkbGUiPuiUreS6jOmfp+aXpTwvdGV4dD48L3N2Zz4=">
@@ -3414,31 +3414,9 @@ function showToast(msg,type='ok'){
     });
   });
 
-  // ── PWA: Service Worker 登録
+  // ── PWA: Service Worker 登録（外部ファイル）
   if('serviceWorker' in navigator){
-    // インラインSWをBlobで登録（ファイル単体動作のため）
-    const swCode=`
-const CACHE='shohin-v1';
-const ASSETS=[location.href];
-self.addEventListener('install',e=>{
-  e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).catch(()=>{}));
-  self.skipWaiting();
-});
-self.addEventListener('activate',e=>{
-  e.waitUntil(clients.claim());
-});
-self.addEventListener('fetch',e=>{
-  e.respondWith(
-    caches.match(e.request).then(cached=>{
-      if(cached) return cached;
-      return fetch(e.request).catch(()=>cached);
-    })
-  );
-});
-`;
-    const swBlob=new Blob([swCode],{type:'application/javascript'});
-    const swUrl=URL.createObjectURL(swBlob);
-    navigator.serviceWorker.register(swUrl,{scope:'./'}).catch(()=>{});
+    navigator.serviceWorker.register('sw.js', {scope: '/shohin-gijiroku/'}).catch(()=>{});
   }
 
   // ── PWA: ホーム画面追加バナー
